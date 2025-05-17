@@ -34,25 +34,48 @@ DEFAULT_PROPHET_PARAMS = {
     'growth': 'linear'
 }
 
+# In app.py, near the top with other configurations
+
+TICKER_TO_FULL_NAME = {
+    "DBA": "Invesco DB Agriculture Fund (DBA)",
+    "FCX": "Freeport-McMoRan Inc. (FCX)",
+    "GLD": "SPDR Gold Shares (GLD)",
+    "NEM": "Newmont Corporation (NEM)",
+    "SLV": "iShares Silver Trust (SLV)",
+    "UNG": "United States Natural Gas Fund (UNG)",
+    "USO": "United States Oil Fund (USO)",
+    "XOM": "Exxon Mobil Corporation (XOM)"
+}
+
 # --- Load Model Hyperparameters ---
 model_hyperparams_catalogue = {}
+# This will now store (display_name, ticker_symbol) for the dropdown
+dropdown_choices = []
+
 print("STARTUP INFO: Loading model hyperparameter configurations...")
 if os.path.exists(MODEL_PARAMS_DIR):
     for filename in os.listdir(MODEL_PARAMS_DIR):
         if filename.startswith(MODEL_PARAMS_PREFIX) and filename.endswith(".json"):
-            model_name_key = filename.replace(MODEL_PARAMS_PREFIX, "").replace(".json", "")
-            # For now, we assume the existence of the JSON means we use default params for that ticker
-            # If your JSONs contained specific hyperparams you wanted to load, that logic would go here.
-            model_hyperparams_catalogue[model_name_key] = DEFAULT_PROPHET_PARAMS.copy()
-            print(f"STARTUP INFO: Registered model config for: {model_name_key}")
+            ticker_symbol = filename.replace(MODEL_PARAMS_PREFIX, "").replace(".json", "")
+            
+            # Store the actual hyperparameters with the ticker_symbol as the key
+            model_hyperparams_catalogue[ticker_symbol] = DEFAULT_PROPHET_PARAMS.copy() # Or load from JSON if needed
+
+            # Get the full name for display, default to ticker if not found
+            display_name = TICKER_TO_FULL_NAME.get(ticker_symbol, ticker_symbol)
+            dropdown_choices.append((display_name, ticker_symbol)) # (label, value) tuple
+            
+            print(f"STARTUP INFO: Registered model config for: {ticker_symbol} (Display: {display_name})")
 else:
     print(f"STARTUP WARNING: Model parameters directory '{MODEL_PARAMS_DIR}' not found.")
 
-available_model_names = sorted(list(model_hyperparams_catalogue.keys()))
-if not available_model_names:
+# Sort dropdown choices by the display name (the first element of the tuple)
+dropdown_choices = sorted(dropdown_choices, key=lambda x: x[0])
+
+if not dropdown_choices:
     print("STARTUP WARNING: No model configurations loaded. Ticker dropdown will be empty.")
 else:
-    print(f"STARTUP INFO: Available models for dropdown: {available_model_names}")
+    print(f"STARTUP INFO: Available models for dropdown: {dropdown_choices}")
 
 # --- Data Fetching and Caching Logic ---
 def load_data_cache():
@@ -312,7 +335,7 @@ with gr.Blocks(css="footer {visibility: hidden}", title="Stock/Commodity Forecas
     with gr.Row():
         with gr.Column(scale=1):
             ticker_dropdown = gr.Dropdown(
-                choices=available_model_names, # Populated from loaded configs
+                choices=dropdown_choices, # Use the list of (label, value) tuples
                 label="Select Ticker Symbol",
                 info="Choose the stock/commodity to forecast."
             )
