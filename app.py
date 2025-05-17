@@ -328,7 +328,7 @@ with gr.Blocks(css="footer {visibility: hidden}", title="Stock/Commodity Forecas
     )
     if not ALPHAVANTAGE_API_KEY: # Display warning in UI if key is missing at startup
         gr.Markdown("<h3 style='color:red;'>WARNING: Alpha Vantage API Key is not configured in Space Secrets. Data fetching will fail.</h3>")
-    if not available_model_names:
+    if not dropdown_choices:
         gr.Markdown("<h3 style='color:red;'>WARNING: No model configurations loaded. Ticker selection will be empty. Check 'trained_models' folder and filenames.</h3>")
 
 
