@@ -1,0 +1,5 @@
+gradio
+prophet
+pandas
+numpy
+alpha-vantage  
