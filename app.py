@@ -78,38 +78,61 @@ def save_data_cache(cache):
 def get_timeseries_data_from_alphavantage(ticker_symbol):
     if not ALPHAVANTAGE_API_KEY:
         print("AV_FETCH ERROR: Alpha Vantage API key is not configured (checked within function).")
-        # This error should ideally be caught before calling, but as a safeguard:
         raise ValueError("Alpha Vantage API key is not configured.")
 
-    print(f"AV_FETCH INFO: Attempting to fetch new data for {ticker_symbol} from Alpha Vantage...")
+    print(f"AV_FETCH INFO: Attempting to fetch UNADJUSTED daily data for {ticker_symbol} from Alpha Vantage using TIME_SERIES_DAILY...")
     ts = TimeSeries(key=ALPHAVANTAGE_API_KEY, output_format='pandas')
     try:
-        data_av, meta_data = ts.get_daily_adjusted(symbol=ticker_symbol, outputsize='full')
+        # Use get_daily() for the TIME_SERIES_DAILY (unadjusted) endpoint
+        data_av, meta_data = ts.get_daily(symbol=ticker_symbol, outputsize='full')
         
+        # --- Process Alpha Vantage DataFrame (for TIME_SERIES_DAILY) ---
+        # 1. Sort by date (Alpha Vantage usually returns newest first for this endpoint too)
         data_av = data_av.sort_index(ascending=True)
-        df_prophet = data_av[['5. adjusted close']].reset_index() # Assumes '5. adjusted close' exists
-        df_prophet.rename(columns={'date': 'ds', '5. adjusted close': 'y'}, inplace=True)
+        
+        # 2. Rename date index to 'ds' and the chosen price column to 'y'
+        #    For TIME_SERIES_DAILY, the close column is typically '4. close'.
+        close_column_name = '4. close' 
+        if close_column_name not in data_av.columns:
+            print(f"AV_FETCH WARNING: Column '{close_column_name}' not found in TIME_SERIES_DAILY data for {ticker_symbol}. Available columns: {data_av.columns.tolist()}")
+            # You might want to try '5. adjusted close' if that's what your key somehow provides, or other fallbacks.
+            # For now, let's assume this is critical.
+            raise KeyError(f"Expected column '{close_column_name}' not found in TIME_SERIES_DAILY response for {ticker_symbol}.")
+
+        df_prophet = data_av[[close_column_name]].reset_index()
+        df_prophet.rename(columns={'date': 'ds', close_column_name: 'y'}, inplace=True)
+        
+        # 3. Ensure 'ds' is datetime
         df_prophet['ds'] = pd.to_datetime(df_prophet['ds'])
+        
+        # 4. Ensure 'y' is numeric
         df_prophet['y'] = pd.to_numeric(df_prophet['y'], errors='coerce')
-        df_prophet.dropna(subset=['y'], inplace=True)
+        df_prophet.dropna(subset=['y'], inplace=True) # Remove rows where y could not be coerced
 
         if df_prophet.empty:
-            print(f"AV_FETCH WARNING: No valid data returned from Alpha Vantage for {ticker_symbol} after processing.")
-            return None
+            print(f"AV_FETCH WARNING: No valid data returned from Alpha Vantage for {ticker_symbol} after processing TIME_SERIES_DAILY.")
+            raise ValueError(f"Processed Alpha Vantage TIME_SERIES_DAILY data for {ticker_symbol} is empty.")
             
-        print(f"AV_FETCH INFO: Successfully fetched and processed {len(df_prophet)} data points for {ticker_symbol}.")
+        print(f"AV_FETCH INFO: Successfully fetched and processed {len(df_prophet)} unadjusted data points for {ticker_symbol}.")
         return df_prophet[['ds', 'y']]
 
-    except Exception as e:
-        print(f"AV_FETCH ERROR for {ticker_symbol}: {type(e).__name__} - {str(e)}")
-        # More detailed error logging for common AV issues
+    except KeyError as ke:
+        error_detail = f"KeyError accessing TIME_SERIES_DAILY Alpha Vantage data for {ticker_symbol}: {str(ke)}. Check column names."
+        print(f"AV_FETCH ERROR: {error_detail}")
+        raise Exception(error_detail) # Re-raise with more context
+    except ValueError as ve: # Catch specific errors like empty processed data
+        error_detail = f"ValueError processing TIME_SERIES_DAILY Alpha Vantage data for {ticker_symbol}: {str(ve)}."
+        print(f"AV_FETCH ERROR: {error_detail}")
+        raise Exception(error_detail) # Re-raise with more context
+    except Exception as e: # General catch-all for other AV errors
+        error_detail = f"Alpha Vantage API Error (TIME_SERIES_DAILY) for {ticker_symbol}: {type(e).__name__} - {str(e)}."
+        print(f"AV_FETCH ERROR: {error_detail}")
         if "invalid api call" in str(e).lower() or "does not exist" in str(e).lower():
-             print(f"AV_FETCH DETAIL: Ticker {ticker_symbol} might not be valid on Alpha Vantage or there's an API call syntax issue.")
+             print(f"AV_FETCH DETAIL: Ticker {ticker_symbol} might not be valid on Alpha Vantage or API call syntax issue.")
         elif "premium membership" in str(e).lower() or "rate limit" in str(e).lower():
-             print("AV_FETCH DETAIL: Alpha Vantage rate limit likely exceeded or premium endpoint accessed with free key.")
-        # Re-raise the exception to be caught by the caller, or return None
-        # For this flow, returning None is handled by the caller.
-        return None
+             # This condition should be less likely now with TIME_SERIES_DAILY, but keep for safety
+             print("AV_FETCH DETAIL: Alpha Vantage rate limit likely exceeded OR an unexpected premium issue with TIME_SERIES_DAILY.")
+        raise Exception(error_detail) # Re-raise with more context
 
 
 def get_and_cache_data(ticker_symbol, min_history_days=730):
