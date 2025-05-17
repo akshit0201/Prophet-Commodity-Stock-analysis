@@ -1,0 +1,45 @@
+# .github/workflows/sync-to-hf-space.yml
+name: Sync to Hugging Face Space
+
+on:
+  push:
+    branches:
+      - main # Or whatever your default branch is
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0 # Fetch all history for accurate diffs
+
+      - name: Push to Hugging Face Space
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+          # Your Hugging Face username
+          HF_USERNAME: GuitarGeorge
+          # The ID of your Space (username/space-name)
+          SPACE_ID: GuitarGeorge/Prophet-commodity-stock-analysis
+        run: |
+          echo "Attempting to push to Hugging Face Space: $SPACE_ID"
+          # Add Hugging Face as a remote
+          # The username in the URL is important for Git to use the correct token
+          git remote add hf_space "https://dummy:${HF_TOKEN}@huggingface.co/spaces/${SPACE_ID}"
+          
+          # Check if the remote was added
+          git remote -v
+          
+          # Configure Git user (sometimes needed in CI, though token auth often bypasses this need for commit identity)
+          git config --global user.email "action@github.com"
+          git config --global user.name "GitHub Action"
+          
+          # Attempt to push. Using -f to force push might be needed if the histories diverge,
+          # but be cautious. A safer approach is to ensure clean history.
+          # For a simple sync, `git push hf_space main` might be enough if main on HF mirrors main on GitHub.
+          # If you want to ensure the Space always reflects the GitHub main branch, a force push is common.
+          # Be aware that force push overwrites the history on the remote.
+          git push --force hf_space HEAD:refs/heads/main
+          
+          echo "Push to Hugging Face Space completed."
