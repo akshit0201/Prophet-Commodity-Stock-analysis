@@ -321,7 +321,7 @@ with gr.Blocks(css="footer {visibility: hidden}", title="Stock/Commodity Forecas
     gr.Markdown(
         "This tool fetches the latest market data using the Alpha Vantage API, "
         "re-fits a Prophet time series model on-the-fly using pre-defined hyperparameters, "
-        "and generates a future price forecast."
+        "and generates a future price forecast. [More details in the readme](https://huggingface.co/spaces/GuitarGeorge/Prophet-commodity-stock-analysis/blob/main/README.md)"
         "\n\n**Note:** Forecasts are for informational purposes only and not financial advice. "
         "Data fetching may be slow on the first request for a ticker each day. "
         "Alpha Vantage free tier has API call limits (5 calls/min, 100 calls/day)."
