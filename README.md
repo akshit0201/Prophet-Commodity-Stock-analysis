@@ -83,30 +83,30 @@ The following table summarizes the performance metrics observed for each ticker 
 *(These plots illustrate how the model's forecast (blue line) and confidence interval (shaded area) compared against the actual test data (black dots) during a historical backtest run.)*
 
 **DBA - Test Forecast vs. Actuals**
-![DBA Test Forecast](images/DBA_test_forecast_vs_actual.png)
+![DBA Test Forecast](https://drive.google.com/uc?export=view&id=112aylZnv3NKTUQWz5HrU2hsRwaNSymMg)
 
 **FCX - Test Forecast vs. Actuals**
-![FCX Test Forecast](images/FCX_test_forecast_vs_actual.png)
+![FCX Test Forecast](https://drive.google.com/uc?export=view&id=10n3XTm9Rsg02_kEL6BcMn3gCUHX_Ws9s)
+)
 
 **GLD - Test Forecast vs. Actuals**
-![GLD Test Forecast](images/GLD_test_forecast_vs_actual.png)
+![GLD Test Forecast](https://drive.google.com/uc?export=view&id=10u1NiRooMPFsKzuSazP6JmIq6os94nyx)
+)
 
 **NEM - Test Forecast vs. Actuals**
-![NEM Test Forecast](images/NEM_test_forecast_vs_actual.png)
+![NEM Test Forecast](https://drive.google.com/uc?export=view&id=10w2mCXzsBy6mciHzVLuG_Zhm00cFEGgu)
 
 **SLV - Test Forecast vs. Actuals**
-![SLV Test Forecast](images/SLV_test_forecast_vs_actual.png)
+![SLV Test Forecast](https://drive.google.com/uc?export=view&id=10rWqezVNT6-6XVNyfe6YYrsOwiQ3pmH)
 
 **UNG - Test Forecast vs. Actuals**
-![UNG Test Forecast](images/UNG_test_forecast_vs_actual.png)
+![UNG Test Forecast](https://drive.google.com/uc?export=view&id=10mM2ldm3ITnEGf9hHlLHfnWfhkjjxlOB)
 
 **USO - Test Forecast vs. Actuals**
-![USO Test Forecast](images/USO_test_forecast_vs_actual.png)
-
-![XOM Test Forecast](https://drive.google.com/uc?export=view&id=112aylZnv3NKTUQWz5HrU2hsRwaNSymMg)
+![USO Test Forecast](https://drive.google.com/uc?export=view&id=10mmxq7bX-stgWfp6PzABEVCuLW83K8Vc)
 
 **XOM - Test Forecast vs. Actuals**
-![XOM Test Forecast](images/XOM_test_forecast_vs_actual.png)
+![XOM Test Forecast](https://drive.google.com/uc?export=view&id=110TK2aASouWvpRfiifVo8M5w5OEN7xv_)
 
 *(Image for XOM provided shows a wide confidence interval, indicating high uncertainty in the long-term forecast for this particular backtest period).*
 
