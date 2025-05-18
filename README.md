@@ -103,8 +103,11 @@ The following table summarizes the performance metrics observed for each ticker 
 **USO - Test Forecast vs. Actuals**
 ![USO Test Forecast](images/USO_test_forecast_vs_actual.png)
 
+![XOM Test Forecast](https://drive.google.com/uc?export=view&id=112aylZnv3NKTUQWz5HrU2hsRwaNSymMg)
+
 **XOM - Test Forecast vs. Actuals**
 ![XOM Test Forecast](images/XOM_test_forecast_vs_actual.png)
+
 *(Image for XOM provided shows a wide confidence interval, indicating high uncertainty in the long-term forecast for this particular backtest period).*
 
 
