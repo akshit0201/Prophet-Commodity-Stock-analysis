@@ -4,42 +4,49 @@ name: Sync to Hugging Face Space
 on:
   push:
     branches:
-      - main # Or whatever your default branch is
+      - main
 
 jobs:
   sync:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4 # Use v4 for latest features
         with:
-          fetch-depth: 0 # Fetch all history for accurate diffs
+          fetch-depth: 0
+          lfs: true # Explicitly enable LFS checkout
+
+      # It's good practice to ensure git-lfs is installed on the runner, though checkout might handle it
+      - name: Install Git LFS
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y git-lfs
+          git lfs install --system --skip-repo # Install LFS globally for the runner
 
       - name: Push to Hugging Face Space
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
-          # Your Hugging Face username
-          HF_USERNAME: GuitarGeorge
-          # The ID of your Space (username/space-name)
           SPACE_ID: GuitarGeorge/Prophet-commodity-stock-analysis
         run: |
           echo "Attempting to push to Hugging Face Space: $SPACE_ID"
-          # Add Hugging Face as a remote
-          # The username in the URL is important for Git to use the correct token
-          git remote add hf_space "https://dummy:${HF_TOKEN}@huggingface.co/spaces/${SPACE_ID}"
           
-          # Check if the remote was added
-          git remote -v
-          
-          # Configure Git user (sometimes needed in CI, though token auth often bypasses this need for commit identity)
+          # Configure Git user
           git config --global user.email "action@github.com"
           git config --global user.name "GitHub Action"
+
+          # Add Hugging Face as a remote with token for authentication
+          # No need for dummy username when token is passed this way for hf.co
+          git remote add hf_space "https://:${HF_TOKEN}@huggingface.co/spaces/${SPACE_ID}"
           
-          # Attempt to push. Using -f to force push might be needed if the histories diverge,
-          # but be cautious. A safer approach is to ensure clean history.
-          # For a simple sync, `git push hf_space main` might be enough if main on HF mirrors main on GitHub.
-          # If you want to ensure the Space always reflects the GitHub main branch, a force push is common.
-          # Be aware that force push overwrites the history on the remote.
+          git remote -v
+
+          # Fetch LFS objects before pushing. This ensures they are available.
+          # This step is crucial for ensuring LFS files are uploaded during the push.
+          git lfs fetch --all origin # Fetch LFS objects from your GitHub origin
+          git lfs push --all hf_space # Push LFS objects to the hf_space remote
+
+          # Push the Git refs (commits, branches)
+          # Use HEAD:refs/heads/main to push the current commit of the local main to the remote main
           git push --force hf_space HEAD:refs/heads/main
           
           echo "Push to Hugging Face Space completed."
