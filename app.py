@@ -5,24 +5,17 @@ import numpy as np
 import os
 import json
 from datetime import datetime, timedelta
-from alpha_vantage.timeseries import TimeSeries # Alpha Vantage library
+import yfinance as yf  # Changed from alpha_vantage to yfinance
 import traceback # For detailed error tracebacks
 
 # --- Configuration ---
 # Directory where your .json model files are (for hyperparameters)
 MODEL_PARAMS_DIR = "./trained_models" # Assuming this is at the root of your Space
 MODEL_PARAMS_PREFIX = "prophet_model_"
-DATA_CACHE_FILE = "data_cache.json" # File to cache Alpha Vantage data
+DATA_CACHE_FILE = "data_cache.json" # File to cache Yahoo Finance data
 
-# Fetch Alpha Vantage API Key from Hugging Face Space Secrets
-ALPHAVANTAGE_API_KEY = os.environ.get("ALPHAVANTAGE_API_KEY")
-
-# This will be printed to the Space's container logs when the app starts
-if not ALPHAVANTAGE_API_KEY:
-    print("CRITICAL STARTUP WARNING: ALPHAVANTAGE_API_KEY secret not found in Space settings!")
-else:
-    print("STARTUP INFO: ALPHAVANTAGE_API_KEY found.")
-
+# Startup log
+print("STARTUP INFO: Running with yfinance integration. No API key needed.")
 
 # Default Prophet parameters (can be overridden by those in JSON files)
 DEFAULT_PROPHET_PARAMS = {
@@ -33,8 +26,6 @@ DEFAULT_PROPHET_PARAMS = {
     'seasonality_prior_scale': 10.0,
     'growth': 'linear'
 }
-
-# In app.py, near the top with other configurations
 
 TICKER_TO_FULL_NAME = {
     "DBA": "Invesco DB Agriculture Fund (DBA)",
@@ -49,7 +40,7 @@ TICKER_TO_FULL_NAME = {
 
 # --- Load Model Hyperparameters ---
 model_hyperparams_catalogue = {}
-# This will now store (display_name, ticker_symbol) for the dropdown
+# This stores (display_name, ticker_symbol) for the dropdown
 dropdown_choices = []
 
 print("STARTUP INFO: Loading model hyperparameter configurations...")
@@ -59,7 +50,7 @@ if os.path.exists(MODEL_PARAMS_DIR):
             ticker_symbol = filename.replace(MODEL_PARAMS_PREFIX, "").replace(".json", "")
             
             # Store the actual hyperparameters with the ticker_symbol as the key
-            model_hyperparams_catalogue[ticker_symbol] = DEFAULT_PROPHET_PARAMS.copy() # Or load from JSON if needed
+            model_hyperparams_catalogue[ticker_symbol] = DEFAULT_PROPHET_PARAMS.copy() 
 
             # Get the full name for display, default to ticker if not found
             display_name = TICKER_TO_FULL_NAME.get(ticker_symbol, ticker_symbol)
@@ -98,70 +89,51 @@ def save_data_cache(cache):
     except Exception as e:
         print(f"CACHE ERROR: Error saving cache file {DATA_CACHE_FILE}: {e}")
 
-def get_timeseries_data_from_alphavantage(ticker_symbol):
-    if not ALPHAVANTAGE_API_KEY:
-        print("AV_FETCH ERROR: Alpha Vantage API key is not configured (checked within function).")
-        raise ValueError("Alpha Vantage API key is not configured.")
-
-    print(f"AV_FETCH INFO: Attempting to fetch UNADJUSTED daily data for {ticker_symbol} from Alpha Vantage using TIME_SERIES_DAILY...")
-    ts = TimeSeries(key=ALPHAVANTAGE_API_KEY, output_format='pandas')
+def get_timeseries_data_from_yfinance(ticker_symbol):
+    print(f"YF_FETCH INFO: Fetching daily history for {ticker_symbol} from Yahoo Finance...")
     try:
-        # Use get_daily() for the TIME_SERIES_DAILY (unadjusted) endpoint
-        data_av, meta_data = ts.get_daily(symbol=ticker_symbol, outputsize='full')
+        ticker = yf.Ticker(ticker_symbol)
+        # Fetch complete history
+        data_yf = ticker.history(period="max")
         
-        # --- Process Alpha Vantage DataFrame (for TIME_SERIES_DAILY) ---
-        # 1. Sort by date (Alpha Vantage usually returns newest first for this endpoint too)
-        data_av = data_av.sort_index(ascending=True)
+        if data_yf.empty:
+            print(f"YF_FETCH WARNING: No data returned from yfinance for {ticker_symbol}.")
+            raise ValueError(f"No data found on Yahoo Finance for ticker {ticker_symbol}.")
+            
+        # Ensure dates are chronological
+        data_yf = data_yf.sort_index(ascending=True)
         
-        # 2. Rename date index to 'ds' and the chosen price column to 'y'
-        #    For TIME_SERIES_DAILY, the close column is typically '4. close'.
-        close_column_name = '4. close' 
-        if close_column_name not in data_av.columns:
-            print(f"AV_FETCH WARNING: Column '{close_column_name}' not found in TIME_SERIES_DAILY data for {ticker_symbol}. Available columns: {data_av.columns.tolist()}")
-            # You might want to try '5. adjusted close' if that's what your key somehow provides, or other fallbacks.
-            # For now, let's assume this is critical.
-            raise KeyError(f"Expected column '{close_column_name}' not found in TIME_SERIES_DAILY response for {ticker_symbol}.")
-
-        df_prophet = data_av[[close_column_name]].reset_index()
-        df_prophet.rename(columns={'date': 'ds', close_column_name: 'y'}, inplace=True)
+        # Reset index to convert 'Date' or 'Datetime' from index to a normal column
+        df_prophet = data_yf[['Close']].reset_index()
         
-        # 3. Ensure 'ds' is datetime
-        df_prophet['ds'] = pd.to_datetime(df_prophet['ds'])
+        # Rename date column to 'ds' and 'Close' to 'y'
+        # Utilizing .columns[0] guarantees correctness even if the index is named 'Date' or 'Datetime'
+        df_prophet.rename(columns={df_prophet.columns[0]: 'ds', 'Close': 'y'}, inplace=True)
         
-        # 4. Ensure 'y' is numeric
+        # Ensure 'ds' is datetime and strip timezone info to prevent Prophet formatting errors
+        df_prophet['ds'] = pd.to_datetime(df_prophet['ds']).dt.tz_localize(None)
+        
+        # Convert prices to numeric and remove null rows
         df_prophet['y'] = pd.to_numeric(df_prophet['y'], errors='coerce')
-        df_prophet.dropna(subset=['y'], inplace=True) # Remove rows where y could not be coerced
+        df_prophet.dropna(subset=['y'], inplace=True) 
 
         if df_prophet.empty:
-            print(f"AV_FETCH WARNING: No valid data returned from Alpha Vantage for {ticker_symbol} after processing TIME_SERIES_DAILY.")
-            raise ValueError(f"Processed Alpha Vantage TIME_SERIES_DAILY data for {ticker_symbol} is empty.")
+            print(f"YF_FETCH WARNING: No valid data after processing {ticker_symbol}.")
+            raise ValueError(f"Processed Yahoo Finance data for {ticker_symbol} is empty.")
             
-        print(f"AV_FETCH INFO: Successfully fetched and processed {len(df_prophet)} unadjusted data points for {ticker_symbol}.")
+        print(f"YF_FETCH INFO: Successfully fetched {len(df_prophet)} data points for {ticker_symbol}.")
         return df_prophet[['ds', 'y']]
 
-    except KeyError as ke:
-        error_detail = f"KeyError accessing TIME_SERIES_DAILY Alpha Vantage data for {ticker_symbol}: {str(ke)}. Check column names."
-        print(f"AV_FETCH ERROR: {error_detail}")
-        raise Exception(error_detail) # Re-raise with more context
-    except ValueError as ve: # Catch specific errors like empty processed data
-        error_detail = f"ValueError processing TIME_SERIES_DAILY Alpha Vantage data for {ticker_symbol}: {str(ve)}."
-        print(f"AV_FETCH ERROR: {error_detail}")
-        raise Exception(error_detail) # Re-raise with more context
-    except Exception as e: # General catch-all for other AV errors
-        error_detail = f"Alpha Vantage API Error (TIME_SERIES_DAILY) for {ticker_symbol}: {type(e).__name__} - {str(e)}."
-        print(f"AV_FETCH ERROR: {error_detail}")
-        if "invalid api call" in str(e).lower() or "does not exist" in str(e).lower():
-             print(f"AV_FETCH DETAIL: Ticker {ticker_symbol} might not be valid on Alpha Vantage or API call syntax issue.")
-        elif "premium membership" in str(e).lower() or "rate limit" in str(e).lower():
-             # This condition should be less likely now with TIME_SERIES_DAILY, but keep for safety
-             print("AV_FETCH DETAIL: Alpha Vantage rate limit likely exceeded OR an unexpected premium issue with TIME_SERIES_DAILY.")
-        raise Exception(error_detail) # Re-raise with more context
+    except Exception as e:
+        error_detail = f"Yahoo Finance API Error for {ticker_symbol}: {type(e).__name__} - {str(e)}."
+        print(f"YF_FETCH ERROR: {error_detail}")
+        raise Exception(error_detail)
 
 
 def get_and_cache_data(ticker_symbol, min_history_days=730):
     cache = load_data_cache()
     today_str = datetime.now().strftime("%Y-%m-%d")
-    status_updates = [] # To collect messages for UI
+    status_updates = [] 
 
     if ticker_symbol in cache and cache[ticker_symbol].get("date_fetched") == today_str:
         status_updates.append(f"Using cached data for {ticker_symbol} from {today_str}.")
@@ -174,17 +146,23 @@ def get_and_cache_data(ticker_symbol, min_history_days=730):
             status_updates.append(f"Error loading data from cache for {ticker_symbol}: {e}. Will try fetching.")
             print(f"CACHE ERROR: Error loading data from cache for {ticker_symbol}: {e}. Will try fetching.")
     
-    status_updates.append(f"No fresh cache for {ticker_symbol}. Attempting to fetch from Alpha Vantage...")
+    status_updates.append(f"No fresh cache for {ticker_symbol}. Attempting to fetch from Yahoo Finance...")
     try:
-        df_new_data = get_timeseries_data_from_alphavantage(ticker_symbol)
-    except ValueError as ve: # Catch missing API key error specifically
-        status_updates.append(f"Data Fetch ERROR: {str(ve)}")
+        df_new_data = get_timeseries_data_from_yfinance(ticker_symbol)
+    except Exception as e: 
+        status_updates.append(f"Data Fetch ERROR: {str(e)}")
+        # Try falling back to older cache if fetching fails
+        if ticker_symbol in cache and "data" in cache[ticker_symbol]:
+            status_updates.append(f"Using older cached data for {ticker_symbol} as a fallback.")
+            print(f"CACHE INFO: Using older cached data for {ticker_symbol} as fallback.")
+            df_data = pd.DataFrame(cache[ticker_symbol]["data"])
+            df_data['ds'] = pd.to_datetime(df_data['ds'])
+            return df_data, "\n".join(status_updates)
         return None, "\n".join(status_updates)
-
 
     if df_new_data is not None and not df_new_data.empty:
         status_updates.append(f"Successfully fetched {len(df_new_data)} new data points for {ticker_symbol}.")
-        if len(df_new_data) < min_history_days / 4: # Stricter check for very short history
+        if len(df_new_data) < min_history_days / 4: 
              warning_msg = f"WARNING: Fetched data for {ticker_symbol} is very short ({len(df_new_data)} days). Forecast quality may be poor."
              status_updates.append(warning_msg)
              print(f"DATA_QUALITY WARNING: {warning_msg}")
@@ -198,7 +176,7 @@ def get_and_cache_data(ticker_symbol, min_history_days=730):
         save_data_cache(cache)
         return df_new_data, "\n".join(status_updates)
     else:
-        status_updates.append(f"Failed to fetch new data for {ticker_symbol} from Alpha Vantage.")
+        status_updates.append(f"Failed to fetch new data for {ticker_symbol} from Yahoo Finance.")
         if ticker_symbol in cache and "data" in cache[ticker_symbol]:
             status_updates.append(f"Using older cached data for {ticker_symbol} as a fallback.")
             print(f"CACHE INFO: Using older cached data for {ticker_symbol} as fallback.")
@@ -214,10 +192,6 @@ def predict_dynamic_forecast(ticker_selection, forecast_periods_str):
     status_message = ""
     empty_forecast_df = pd.DataFrame(columns=['Date (ds)', 'Predicted Price (yhat)', 'Lower Bound', 'Upper Bound'])
 
-    if not ALPHAVANTAGE_API_KEY: # Check at the very beginning of the request
-        print("PREDICT_ERROR: Alpha Vantage API Key not configured.")
-        return "ERROR: Alpha Vantage API Key not configured in Space Secrets. Please check Space settings.", empty_forecast_df
-
     if not ticker_selection:
         return "Please select a ticker.", empty_forecast_df
     
@@ -230,12 +204,12 @@ def predict_dynamic_forecast(ticker_selection, forecast_periods_str):
 
     hyperparams = model_hyperparams_catalogue.get(ticker_selection)
     if not hyperparams: 
-        return f"Internal Error: Configuration for '{ticker_selection}' not found (though it should be in dropdown).", empty_forecast_df
+        return f"Internal Error: Configuration for '{ticker_selection}' not found in configuration list.", empty_forecast_df
 
     try:
         status_message += f"Initiating forecast for {ticker_selection} for {forecast_periods} days...\n"
         
-        historical_df, data_fetch_status = get_and_cache_data(ticker_selection, min_history_days=365 * 1) # Min 1 year
+        historical_df, data_fetch_status = get_and_cache_data(ticker_selection, min_history_days=365 * 1) 
         status_message += data_fetch_status + "\n"
         
         if historical_df is None or historical_df.empty:
@@ -246,31 +220,24 @@ def predict_dynamic_forecast(ticker_selection, forecast_periods_str):
         status_message += f"Data loaded ({len(historical_df)} rows). Preprocessing for Prophet (log transform 'y')...\n"
         print(f"PREDICT_INFO: Data loaded for {ticker_selection}, rows: {len(historical_df)}")
 
-        # Prophet needs at least 2 data points, practically more.
         if len(historical_df) < 10: 
-            status_message += f"Historical data for {ticker_selection} is too short ({len(historical_df)} points) to make a reliable forecast."
-            print(f"PREDICT_ERROR: Data too short for {ticker_selection} ({len(historical_df)} points)")
+            status_message += f"Historical data for {ticker_selection} is too short ({len(historical_df)} points) to fit a model."
+            print(f"PREDICT_ERROR: Data too short for {ticker_selection}")
             return status_message, empty_forecast_df
 
         fit_df = historical_df.copy()
-        # Ensure 'y' is positive before log transform
+        # Filter out zero or negative prices before the log transform
         if (fit_df['y'] <= 0).any():
-            status_message += "WARNING: Historical data contains zero or negative prices. These will be removed before log transformation. This might affect data quantity.\n"
-            print(f"PREDICT_WARNING: Zero/negative prices found for {ticker_selection}. Filtering them out.")
+            status_message += "WARNING: Historical data contains zero or negative prices. These will be removed before log transformation.\n"
             fit_df = fit_df[fit_df['y'] > 0]
             if len(fit_df) < 10:
-                 status_message += f"After removing non-positive prices, data for {ticker_selection} is too short ({len(fit_df)} points)."
-                 print(f"PREDICT_ERROR: Data too short after filtering non-positive prices for {ticker_selection}")
+                 status_message += f"After filtering, data for {ticker_selection} is too short ({len(fit_df)} points)."
                  return status_message, empty_forecast_df
         
         fit_df['y'] = np.log(fit_df['y'])
-        # No need to replace inf/nan if we filter y > 0 before log.
-        # fit_df.replace([np.inf, -np.inf], np.nan, inplace=True) # Should not be needed if y > 0
-        # fit_df['y'] = fit_df['y'].ffill().bfill() # Should not be needed if y > 0 and no other NaNs
 
-        if fit_df['y'].isnull().any(): # Check if any NaNs created for other reasons
-            status_message += f"NaNs present in log-transformed 'y' for {ticker_selection}. Cannot fit model."
-            print(f"PREDICT_ERROR: NaNs in log-transformed y for {ticker_selection}")
+        if fit_df['y'].isnull().any(): 
+            status_message += f"NaNs present in log-transformed 'y' for {ticker_selection}. Aborting model fit."
             return status_message, empty_forecast_df
 
         status_message += f"Fitting Prophet model for {ticker_selection}...\n"
@@ -289,9 +256,8 @@ def predict_dynamic_forecast(ticker_selection, forecast_periods_str):
         output_df['Upper Bound (yhat_upper)'] = np.exp(forecast_log_scale['yhat_upper'])
         
         final_forecast_df = output_df.tail(forecast_periods).reset_index(drop=True)
-        final_forecast_df['Date (ds)'] = final_forecast_df['ds'].dt.strftime('%Y-%m-%d') # Format date string
+        final_forecast_df['Date (ds)'] = final_forecast_df['ds'].dt.strftime('%Y-%m-%d')
         final_forecast_df = final_forecast_df[['Date (ds)', 'Predicted Price (yhat)', 'Lower Bound (yhat_lower)', 'Upper Bound (yhat_upper)']]
-
 
         status_message += "Forecast generated successfully."
         print(f"PREDICT_INFO: Forecast successful for {ticker_selection}")
@@ -307,9 +273,8 @@ def predict_dynamic_forecast(ticker_selection, forecast_periods_str):
             f"Message: {str(e)}\n\n"
             f"--- Traceback (last few lines) ---\n"
         )
-        # Add last few lines of traceback, ensuring not to overflow status box too much
         traceback_lines = tb_str.strip().splitlines()
-        for line in traceback_lines[-7:]: # Show last 7 lines
+        for line in traceback_lines[-7:]: 
             error_ui_message += line + "\n"
         
         status_message += f"\n{error_ui_message}"
@@ -319,23 +284,19 @@ def predict_dynamic_forecast(ticker_selection, forecast_periods_str):
 with gr.Blocks(css="footer {visibility: hidden}", title="Stock/Commodity Forecaster") as iface:
     gr.Markdown("# Stock & Commodity Price Forecaster")
     gr.Markdown(
-        "This tool fetches the latest market data using the Alpha Vantage API, "
+        "This tool fetches the latest market data using Yahoo Finance via yfinance, "
         "re-fits a Prophet time series model on-the-fly using pre-defined hyperparameters, "
         "and generates a future price forecast. [More details in the readme](https://github.com/akshit0201/Prophet-Commodity-Stock-analysis/blob/main/README.md)"
         "\n\n**Note:** Forecasts are for informational purposes only and not financial advice. "
-        "Data fetching may be slow on the first request for a ticker each day. "
-        "Alpha Vantage free tier has API call limits (5 calls/min, 100 calls/day)."
+        "Data fetching may take a moment on the first request for a ticker each day."
     )
-    if not ALPHAVANTAGE_API_KEY: # Display warning in UI if key is missing at startup
-        gr.Markdown("<h3 style='color:red;'>WARNING: Alpha Vantage API Key is not configured in Space Secrets. Data fetching will fail.</h3>")
     if not dropdown_choices:
         gr.Markdown("<h3 style='color:red;'>WARNING: No model configurations loaded. Ticker selection will be empty. Check 'trained_models' folder and filenames.</h3>")
-
 
     with gr.Row():
         with gr.Column(scale=1):
             ticker_dropdown = gr.Dropdown(
-                choices=dropdown_choices, # Use the list of (label, value) tuples
+                choices=dropdown_choices, 
                 label="Select Ticker Symbol",
                 info="Choose the stock/commodity to forecast."
             )
@@ -343,7 +304,7 @@ with gr.Blocks(css="footer {visibility: hidden}", title="Stock/Commodity Forecas
                 value=30, 
                 label="Forecast Periods (Days)", 
                 minimum=1, 
-                maximum=365 * 2, # Max 2 years forecast
+                maximum=365 * 2, 
                 step=1,
                 info="Number of future days to predict."
             )
@@ -352,7 +313,7 @@ with gr.Blocks(css="footer {visibility: hidden}", title="Stock/Commodity Forecas
         with gr.Column(scale=3):
             status_textbox = gr.Textbox(
                 label="Process Status & Logs", 
-                lines=15, # Increased lines for more detailed logs/errors
+                lines=15, 
                 interactive=False,
                 placeholder="Status messages will appear here..."
             )
@@ -360,7 +321,6 @@ with gr.Blocks(css="footer {visibility: hidden}", title="Stock/Commodity Forecas
     gr.Markdown("## Forecast Results")
     forecast_output_table = gr.DataFrame(
         label="Price Forecast Data"
-        # Headers will be inferred from the DataFrame column names now
     )
 
     predict_button.click(
@@ -372,12 +332,12 @@ with gr.Blocks(css="footer {visibility: hidden}", title="Stock/Commodity Forecas
     gr.Markdown("---")
     gr.Markdown(
         "**How it works:** Models are based on Facebook's Prophet. Hyperparameters are pre-set. "
-        "Historical data for the selected ticker is fetched from Alpha Vantage, log-transformed, and used to fit the model. "
+        "Historical data for the selected ticker is fetched from Yahoo Finance, log-transformed, and used to fit the model. "
         "Predictions are then exponentiated back to the original price scale. "
-        "Fetched data is cached daily in the Space's temporary storage to minimize Alpha Vantage API calls and speed up subsequent requests for the same ticker on the same day."
+        "Fetched data is cached daily in the Space's temporary storage to minimize network requests and speed up subsequent requests for the same ticker on the same day."
     )
 
 # --- Launch the Gradio App ---
 if __name__ == "__main__":
     print("STARTUP INFO: Launching Gradio interface...")
-    iface.launch() # In Hugging Face Spaces, this is all you need.
+    iface.launch()
