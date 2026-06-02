@@ -8,6 +8,7 @@ from datetime import datetime, timedelta
 import yfinance as yf
 import traceback
 import threading
+import random  # Added for strict seed control
 from concurrent.futures import ThreadPoolExecutor
 
 # --- Configuration & Threading Locks ---
@@ -238,9 +239,17 @@ def run_single_inference(ticker_symbol, forecast_periods, hyperparams):
                 "df": None, "current_price": current_price, "predicted_price": None, "expected_return": None
             }
             
+        # --- Strict Seed Enforcement for Model Fit ---
+        random.seed(42)
+        np.random.seed(42)
+        
         # Fit Prophet model
         model = Prophet(**hyperparams)
         model.fit(fit_df[['ds', 'y']])
+        
+        # --- Strict Seed Enforcement for Predict Monte Carlo Simulation ---
+        random.seed(42)
+        np.random.seed(42)
         
         future_df = model.make_future_dataframe(periods=forecast_periods, freq='D')
         forecast_log_scale = model.predict(future_df)
